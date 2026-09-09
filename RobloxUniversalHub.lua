@@ -1,12 +1,10 @@
 -- ============================================
--- Roblox Universal Hub - Komplettes Executor GUI v2.0
--- Compatible mit allen populären Exploits
--- BUGFIX: CornerRadius Fehler behoben
--- Verbesserungen: UICorner, Memory Management, TweenService
+-- Roblox Universal Hub - Komplettes Executor GUI v2.1
+-- DEBUG: HttpGet Validation + Error Handling
 -- ============================================
 
 local hub = {}
-hub.version = "2.0"
+hub.version = "2.1"
 hub.running = true
 hub.minimized = false
 hub.settings = {
@@ -33,6 +31,101 @@ local RunService = game:GetService("RunService")
 local TweenService = game:GetService("TweenService")
 local LocalPlayer = Players.LocalPlayer
 local Mouse = LocalPlayer:GetMouse()
+
+-- Debug Logging
+local function debugLog(level, message)
+	local prefix = {
+		ERROR = "❌",
+		WARN = "⚠️",
+		INFO = "ℹ️",
+		SUCCESS = "✅"
+	}
+	print(string.format("[%s HUB v%s] %s %s", prefix[level] or "?", hub.version, level, message))
+end
+
+-- ============================================
+-- VALIDATION FUNCTIONS
+-- ============================================
+
+local function validateUrl(url)
+	if not url or type(url) ~= "string" then
+		debugLog("ERROR", "URL muss ein String sein")
+		return false
+	end
+	if not string.match(url, "^https?://") then
+		debugLog("ERROR", "URL muss mit http:// oder https:// beginnen")
+		return false
+	end
+	return true
+end
+
+local function validateHttpGetResponse(content)
+	if not content or type(content) ~= "string" then
+		debugLog("ERROR", "HttpGet hat keinen Content zurückgegeben")
+		return false, "No content"
+	end
+	
+	-- Länge prüfen
+	if #content < 50 then
+		debugLog("ERROR", "Content zu kurz: " .. #content .. " bytes")
+		return false, "Content too short"
+	end
+	
+	-- HTML-Fehler erkennen
+	if string.match(content, "<!DOCTYPE") or string.match(content, "<html") then
+		debugLog("ERROR", "Content ist HTML, nicht Lua: Möglicherweise 404 oder falscher Link")
+		return false, "HTML returned (404 or wrong URL)"
+	end
+	
+	-- "Example Domain" Fehler
+	if string.match(content, "Example Domain") then
+		debugLog("ERROR", "Content ist 'Example Domain' - URL ist falsch!")
+		return false, "Example Domain (wrong URL)"
+	end
+	
+	-- Lua-Syntaxfehler prüfen
+	local luaKeywords = {"local", "function", "return", "if", "end", "for", "while"}
+	local hasLuaKeyword = false
+	for _, keyword in ipairs(luaKeywords) do
+		if string.match(content, keyword) then
+			hasLuaKeyword = true
+			break
+		end
+	end
+	
+	if not hasLuaKeyword then
+		debugLog("WARN", "Content sieht nicht wie Lua aus (keine Keywords gefunden)")
+		return false, "Not Lua code"
+	end
+	
+	return true, "Valid"
+end
+
+local function downloadScript(url)
+	if not validateUrl(url) then
+		return nil
+	end
+	
+	debugLog("INFO", "Lade Script von: " .. url)
+	
+	local success, content = pcall(function()
+		return game:HttpGet(url)
+	end)
+	
+	if not success then
+		debugLog("ERROR", "HttpGet ist fehlgeschlagen: " .. tostring(content))
+		return nil
+	end
+	
+	local isValid, reason = validateHttpGetResponse(content)
+	if not isValid then
+		debugLog("ERROR", "Response-Validierung fehlgeschlagen: " .. reason)
+		return nil
+	end
+	
+	debugLog("SUCCESS", "Script erfolgreich heruntergeladen (" .. #content .. " bytes)")
+	return content
+end
 
 -- Farb-Themes
 local themes = {
@@ -1040,7 +1133,10 @@ function hub:init()
 	end)
 end
 
--- Start
+-- ============================================
+-- ENTRY POINT
+-- ============================================
+
 if not hub.running then
 	hub:init()
 end
